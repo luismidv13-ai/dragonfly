@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Mecatecno Dragonfly - Advanced ECU & Telemetry</title>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- SDKs de Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.3.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.3.1/firebase-auth-compat.js"></script>
+
+<style>
+  :root {
+    --bg-dark: #030407;
+    --panel-bg: #0b0d13;
+    --card-bg: #11141d;
+    --border-line: #1f2533;
+    --text-light: #f1f5f9;
+    --text-dim: #94a3b8;
+    --text-desc: #64748b;
+    
+    --accent-dry: #ff3b00; 
+    --accent-wet: #00bfff; 
+    --accent-trail: #00e676; 
+    --active-accent: var(--accent-dry);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    background-color: var(--bg-dark);
+    color: var(--text-light);
+    font-family: 'Chakra Petch', sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+    padding: 10px;
+    background-image: 
+      radial-gradient(circle at 50% 0%, rgba(255, 59, 0, 0.04) 0%, transparent 65%),
+      linear-gradient(0deg, rgba(3,4,7,1) 0%, rgba(11,13,19,1) 100%);
+  }
+
+  .ecu-chassis {
+    position: relative;
+    background: var(--panel-bg);
+    border: 1px solid var(--border-line);
+    border-radius: 16px;
+    width: 100%;
+    max-width: 520px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.85), inset 0 1px 0 rgba(255,255,255,0.05);
+    overflow: hidden;
+  }
+
+  .content-layer { position: relative; z-index: 1; }
+
+  /* CABECERA */
+  .ecu-header {
+    background: rgba(11, 13, 19, 0.95);
+    padding: 16px;
+    border-bottom: 1px solid var(--border-line);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    backdrop-filter: blur(10px);
+  }
+  .ecu-title h1 { font-size: 1.1rem; font-weight: 700; letter-spacing: 1.5px; color: #fff; margin-bottom: 2px; }
+  .ecu-title span { font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+
+  .bt-connect-btn {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border-line);
+    color: var(--text-light);
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .bt-connect-btn.connected {
+    background: rgba(0, 230, 118, 0.1);
+    border-color: var(--accent-trail);
+    color: var(--accent-trail);
+    box-shadow: 0 0 15px rgba(0, 230, 118, 0.2);
+  }
+
+  /* GESTIÓN DE MAPAS E HISTORIAL */
+  .management-deck {
+    padding: 12px 16px;
+    background: rgba(3, 4, 7, 0.6);
+    border-bottom: 1px solid var(--border-line);
+  }
+  
+  .file-actions {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  
+  .mini-btn {
+    flex: 1;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border-line);
+    color: var(--text-dim);
+    padding: 8px;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 0.65rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: all 0.2s ease;
+  }
+  .mini-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+
+  .history-box {
+    background: #06070a;
+    border: 1px solid var(--border-line);
+    border-radius: 6px;
+    height: 55px;
+    overflow-y: auto;
+    padding: 6px;
+    font-size: 0.62rem;
+    color: var(--text-desc);
+  }
+  .history-box::-webkit-scrollbar { width: 4px; }
+  .history-box::-webkit-scrollbar-thumb { background: var(--border-line); border-radius: 2px; }
+  .history-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 4px;
+    border-bottom: 1px solid rgba(255,255,255,0.02);
+  }
+  .history-item:last-child { border-bottom: none; }
+  .history-time { color: var(--text-dim); }
+  .history-map { font-weight: bold; color: var(--active-accent); }
+
+  /* SELECTOR DE MAPAS */
+  .maps-selector { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 16px; }
+  .map-opt {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border-line);
+    border-radius: 10px;
+    padding: 12px 0;
+    text-align: center;
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    transition: all 0.3s ease;
+  }
+  .map-opt.active { background: rgba(255,255,255,0.05); color: #fff; }
+  .map-opt.active.dry { border-color: var(--accent-dry); box-shadow: 0 4px 15px rgba(255, 59, 0, 0.2); color: var(--accent-dry); }
+  .map-opt.active.wet { border-color: var(--accent-wet); box-shadow: 0 4px 15px rgba(0, 191, 255, 0.2); color: var(--accent-wet); }
+  .map-opt.active.trail { border-color: var(--accent-trail); box-shadow: 0 4px 15px rgba(0, 230, 118, 0.2); color: var(--accent-trail); }
+
+  /* CUERPO DE CALIBRACIÓN */
+  .calibration-body { padding: 0 16px; max-height: 50vh; overflow-y: auto; scroll-behavior: smooth; }
+  .calibration-body::-webkit-scrollbar { width: 4px; }
+  .calibration-body::-webkit-scrollbar-thumb { background: var(--border-line); border-radius: 2px; }
+
+  /* TARJETAS DE PARÁMETROS */
+  .param-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-line);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    transition: border-color 0.3s;
+  }
+  .param-card:hover { border-color: rgba(255,255,255,0.12); }
+  
+  .param-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
+  .param-title { font-size: 0.82rem; font-weight: 600; color: #fff; letter-spacing: 0.5px; text-transform: uppercase; display: block; }
+  .param-desc { font-size: 0.63rem; color: var(--text-desc); margin-top: 3px; display: block; line-height: 1.35; padding-right: 15px;}
+  .param-number { font-size: 0.82rem; font-weight: 700; color: var(--active-accent); font-family: monospace; background: rgba(0,0,0,0.4); padding: 3px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05); white-space: nowrap; }
+
+  /* GRÁFICOS VISUALES DEDICADOS */
+  .visual-container { width: 100%; height: 32px; margin: 6px 0; display: flex; align-items: center; justify-content: center; }
+  svg.dynamic-gfx { width: 100%; height: 100%; overflow: visible; }
+  .gfx-path { fill: none; stroke: var(--active-accent); stroke-width: 3; stroke-linecap: round; transition: all 0.15s ease; }
+  .gfx-bg { stroke: var(--border-line); stroke-width: 2; fill: none; stroke-linecap: round; }
+
+  /* SLIDERS MODERNOS */
+  .slider-wrapper { position: relative; display: flex; align-items: center; height: 24px; margin-top: 2px; }
+  input[type=range] { -webkit-appearance: none; width: 100%; background: transparent; z-index: 2; position: relative; cursor: pointer; }
+  .slider-track-bg { position: absolute; top: 50%; left: 0; transform: translateY(-50%); width: 100%; height: 6px; background: #06070a; border-radius: 4px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.9); z-index: 0; }
+  .slider-track-fill { position: absolute; top: 50%; left: 0; transform: translateY(-50%); height: 6px; background: linear-gradient(90deg, rgba(255,255,255,0.05), var(--active-accent)); border-radius: 4px; z-index: 1; pointer-events: none; transition: width 0.05s linear; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 18px; width: 18px; border-radius: 50%; background: #fff; border: 4px solid var(--card-bg); box-shadow: 0 0 10px var(--active-accent), 0 2px 5px rgba(0,0,0,0.6); transition: transform 0.1s; }
+  input[type=range]::-webkit-slider-thumb:active { transform: scale(1.25); }
+  input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 20px; background: transparent; }
+
+  /* BOTÓN DE TRANSMISIÓN */
+  .action-panel { padding: 16px; background: rgba(3, 4, 7, 0.9); border-top: 1px solid var(--border-line); margin-top: 8px; }
+  .send-ecu-btn {
+    width: 100%; background: transparent; color: var(--active-accent); border: 2px solid var(--active-accent); border-radius: 10px; padding: 14px; font-family: inherit; font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; cursor: pointer; box-shadow: 0 0 15px rgba(0,0,0,0.5); transition: all 0.2s ease;
+  }
+  .send-ecu-btn:hover { background: var(--active-accent); color: #000; box-shadow: 0 0 20px var(--active-accent); }
+  .send-ecu-btn:active { transform: translateY(2px); }
+
+  /* LOGIN */
+  #login-panel { padding: 40px 20px; text-align: center; }
+  .input-field { width: 100%; background: #06070a; border: 1px solid var(--border-line); border-radius: 8px; padding: 14px; color: #fff; font-family: inherit; margin-bottom: 15px; outline: none; }
+  .input-field:focus { border-color: var(--accent-dry); }
+  #ecu-main { display: none; }
+</style>
+</head>
+<body>
+
+<div class="ecu-chassis">
+  <div class="content-layer">
+
+    <!-- AUTENTICACIÓN FIREBASE -->
+    <div id="login-panel">
+      <h2 style="font-size: 1.3rem; letter-spacing: 2px; margin-bottom: 5px; color: #fff;">DRAGONFLY LINK</h2>
+      <p style="font-size: 0.75rem; color: var(--text-dim); margin-bottom: 30px;">Mecatecno ECU Management</p>
+      <input type="email" id="login-email" class="input-field" placeholder="Correo de Piloto">
+      <input type="password" id="login-password" class="input-field" placeholder="Contraseña">
+      <button class="send-ecu-btn" style="border-color: var(--text-dim); color: var(--text-light);" onclick="iniciarSesion()">ACCEDER A TELEMETRÍA</button>
+      <p id="login-error" style="color: #ff4d4d; font-size: 0.7rem; margin-top: 15px;"></p>
+    </div>
+
+    <!-- PANTALLA PRINCIPAL ECU -->
+    <div id="ecu-main">
+      <div class="ecu-header">
+        <div class="ecu-title">
+          <h1>MECATECNO ECU</h1>
+          <span>Dragonfly Setup Professional</span>
+        </div>
+        <button class="bt-connect-btn" id="bt-btn" onclick="toggleRealBluetooth()">
+          <span id="bt-icon">📡</span> <span id="bt-status-text">CONECTAR BLE</span>
+        </button>
+      </div>
+
+      <!-- PANEL DE GESTIÓN DE ARCHIVOS E HISTORIAL -->
+      <div class="management-deck">
+        <div class="file-actions">
+          <button class="mini-btn" onclick="document.getElementById('file-upload').click()">📂 Cargar Mapa (.json)</button>
+          <input type="file" id="file-upload" accept=".json" style="display: none;" onchange="importMap(event)">
+          <button class="mini-btn" onclick="exportMap()">💾 Descargar Mapa</button>
+        </div>
+        <div class="history-box" id="history-container">
+          <!-- Historial dinámico -->
+        </div>
+      </div>
+
+      <div class="maps-selector">
+        <div class="map-opt dry active" onclick="switchMap('dry', this, 'var(--accent-dry)')">RACE / SECO</div>
+        <div class="map-opt wet" onclick="switchMap('wet', this, 'var(--accent-wet)')">MOJADO</div>
+        <div class="map-opt trail" onclick="switchMap('trail', this, 'var(--accent-trail)')">CAMINOS</div>
+      </div>
+
+      <div class="calibration-body">
+        
+        <!-- 1. JUEGO MUERTO PUÑO DE GAS -->
+        <div class="param-card">
+          <div class="param-head">
+            <div>
+              <span class="param-title">1. Juego Muerto Puño de Gas</span>
+              <span class="param-desc">Milímetros de recorrido en vacío antes de respuesta.</span>
+            </div>
+            <span class="param-number" id="lbl-dead">2 mm</span>
+          </div>
+          <div class="visual-container">
+            <svg class="dynamic-gfx" viewBox="0 0 100 20">
+              <line x1="0" y1="10" x2="100" y2="10" class="gfx-bg" />
+              <line x1="0" y1="10" x2="0" y2="10" class="gfx-path" id="svg-dead" stroke-width="8" />
+            </svg>
+          </div>
+          <div class="slider-wrapper">
+            <div class="slider-track-bg"></div>
+            <div class="slider-track-fill" id="fill-dead"></div>
+            <input type="range" id="sl-dead" min="0" max="10" step="1" value="2" oninput="updateUI()">
+          </div>
+        </div>
+
+        <!-- 2. RECORRIDO PUÑO DE GAS -->
+        <div class="param-card">
+          <div class="param-head">
+            <div>
+              <span class="param-title">2. Recorrido Puño de Gas</span>
+              <span class="param-desc">Ángulo total de giro necesario para abrir 100%.</span>
+            </div>
+            <span class="param-number" id="lbl-stroke">75°</span>
+          </div>
+          <div class="visual-container">
+            <svg class="dynamic-gfx" viewBox="0 0 100 32">
+              <path d="M 10 28 A 40 40 0 0 1 90 28" class="gfx-bg" />
+              <path d="" class="gfx-path" id="svg-stroke" />
+            </svg>
+          </div>
+          <div class="slider-wrapper">
+            <div class="slider-track-bg"></div>
+            <div class="slider-track-fill" id="fill-stroke"></div>
+            <input type="range" id="sl-stroke" min="50" max="100" step="1" value="75" oninput="updateUI()">
+          </div>
+        </div>
+
+        <!-- 3. CURVA DE POTENCIA -->
+        <div class="param-card">
+          <div class="param-head">
+            <div>
+              <span class="param-title">3. Curva de Potencia</span>
+              <span class="param-desc">Progresión del motor: Suave, Lineal o Agresiva.</span>
+            </div>
+            <span class="param-number" id="lbl-curve">Agresiva</span>
+          </div>
+          <div class="visual-container">
+            <svg class="dynamic-gfx" viewBox="0 0 100 30">
+              <line x1="0" y1="30" x2="100" y2="30" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+              <path d="" class="gfx-path" id="svg-curve" />
+            </svg>
+          </div>
+          <div class="slider-wrapper">
+            <div class="slider-track-bg"></div>
+            <div class="slider-track-fill" id="fill-curve"></div>
+            <input type="range" id="sl-curve" min="1" max="3" step="1" value="3" oninput="updateUI()">
+          </div>
+        </div>
+
+        <!-- 4. MULTIPLICADOR DE GAS -->
+        <div class="param-card">
+          <div class="param-head">
+            <div>
+              <span class="param-title">4. Multiplicador de Gas</span>
+              <span class="param-desc">Factor de ganancia en el primer tramo del acelerador.</span>
+            </div>
+            <span class="param-number" id="lbl-mult">1.2x</span>
+          </div>
+          <div class="visual-container">
+            <svg class="dynamic-gfx" viewBox="0 0 100 28">
+              <line x1="0" y1="28" x2="100" y2="28" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+              <line x1="0" y1="28" x2="100" y2="0" class="gfx-path" id="svg-mult" />
+            </svg>
+          </div>
+          <div class="slider-wrapper">
+            <div class="slider-track-bg"></div>
+            <div class="slider-track-fill" id="fill-mult"></div>
+            <input type="range" id="sl-mult" min="0.5" max="2.0" step="0.1" value="1.2" oninput="updateUI()">
+          </div>
+        </div>
+
+        <!-- 5. INERCIA ELECTRÓNICA -->
+        <div class="param-card">
+          <div class="param-head">
+            <div>
+              <span class="param-title">5. Inercia Electrónica</span>
+              <span class="param-desc">Mantiene el impulso del motor tras cortar gas.</span>
+            </div>
+            <span class="param-number" id="lbl-inertia">Nivel 3</span>
+          </div>
+          <div class="visual-container">
+            <svg class="dynamic-gfx" viewBox="0 0 100 26">
+              <path d="" class="gfx-path" id="svg-inertia" />
+            </svg>
+          </div>
+          <div class="slider-wrapper">
+            <div class="slider-track-bg"></div>
+            <div class="slider-track-fill" id="fill-inertia"></div>
+            <input type="range" id="sl-inertia" min="0" max="10" step="1" value="3" oninput="updateUI()">
+          </div>
+        </div>
+
+        <!-- 6. VELOCIDAD MÁXIMA -->
+        <div class="param-card">
+          <div class="param-head">
+            <div>
+              <span class="param-title">6. Velocidad Máxima</span>
+              <span class="param-desc">Límite de velocidad punta (o Sin Límite).</span>
+            </div>
+            <span class="param-number" id="lbl-maxspd">Sin Límite</span>
+          </div>
+          <div class="visual-container">
+            <svg class="dynamic-gfx" viewBox="0 0 100 22">
+              <rect x="0" y="6" width="100" height="8" rx="4" fill="#06070a" stroke="var(--border-line)" />
+              <rect x="0" y="6" width="100" height="8" rx="4" class="gfx-path" id="svg-maxspd-bar" style="fill: var(--active-accent); stroke: none;" />
+            </svg>
+          </div>
+          <div class="slider-wrapper">
+            <div class="slider-track-bg"></div>
+            <div class="slider-track-fill" id="fill-maxspd"></div>
+            <input type="range" id="sl-maxspd" min="10" max="100" step="5" value="100" oninput="updateUI()">
+          </div>
+        </div>
+
+        <!-- 7. POTENCIA MÁXIMA -->
+        <div class="param-card">
+          <div class="param-head">
+            <div>
+              <span class="param-title">7. Potencia Máxima</span>
+              <span class="param-desc">Tope de potencia eléctrica entregada (hasta 100%).</span>
+            </div>
+            <span class="param-number" id="lbl-pwr">100%</span>
+          </div>
+          <div class="visual-container" id="svg-pwr" style="display:flex; justify-content:space-between; gap:2px; height:20px; align-items:flex-end;">
+            <!-- Generado por JS -->
+          </div>
+          <div class="slider-wrapper">
+            <div class="slider-track-bg"></div>
+            <div class="slider-track-fill" id="fill-pwr"></div>
+            <input type="range" id="sl-pwr" min="10" max="100" step="5" value="100" oninput="updateUI()">
+          </div>
+        </div>
+
+        <!-- 8. PAR MÁXIMO -->
+        <div class="param-card">
+          <div class="param-head">
+            <div>
+              <span class="param-title">8. Par Máximo</span>
+              <span class="param-desc">Fuerza de empuje bruta instantánea desde 0 RPM.</span>
+            </div>
+            <span class="param-number" id="lbl-torque">100%</span>
+          </div>
+          <div class="visual-container" id="svg-torque" style="display:flex; justify-content:space-between; gap:2px; height:20px; align-items:flex-end;">
+            <!-- Generado por JS -->
+          </div>
+          <div class="slider-wrapper">
+            <div class="slider-track-bg"></div>
+            <div class="slider-track-fill" id="fill-torque"></div>
+            <input type="range" id="sl-torque" min="10" max="100" step="5" value="100" oninput="updateUI()">
+          </div>
+        </div>
+
+        <!-- 9. FRENO REGENERATIVO -->
+        <div class="param-card">
+          <div class="param-head">
+            <div>
+              <span class="param-title">9. Freno Regenerativo</span>
+              <span class="param-desc">Retención del motor eléctrico al soltar gas.</span>
+            </div>
+            <span class="param-number" id="lbl-regen">Nivel 2</span>
+          </div>
+          <div class="visual-container">
+            <svg class="dynamic-gfx" viewBox="0 0 100 22">
+              <path d="M 0 18 L 20 18 L 30 4 L 40 18 L 100 18" class="gfx-bg" />
+              <path d="M 0 18 L 20 18 L 30 4 L 40 18 L 100 18" class="gfx-path" id="svg-regen" />
+            </svg>
+          </div>
+          <div class="slider-wrapper">
+            <div class="slider-track-bg"></div>
+            <div class="slider-track-fill" id="fill-regen"></div>
+            <input type="range" id="sl-regen" min="0" max="5" step="1" value="2" oninput="updateUI()">
+          </div>
+        </div>
+
+        <!-- 10. RALENTÍ ELECTRÓNICO -->
+        <div class="param-card">
+          <div class="param-head">
+            <div>
+              <span class="param-title">10. Ralentí Electrónico</span>
+              <span class="param-desc">Mantiene el motor girando a RPM mínimas continuas.</span>
+            </div>
+            <span class="param-number" id="lbl-idle">Desactivado</span>
+          </div>
+          <div class="visual-container">
+            <svg class="dynamic-gfx" viewBox="0 0 100 22">
+              <path d="M 0 11 Q 25 2, 50 11 T 100 11" class="gfx-path" id="svg-idle" />
+            </svg>
+          </div>
+          <div class="slider-wrapper">
+            <div class="slider-track-bg"></div>
+            <div class="slider-track-fill" id="fill-idle"></div>
+            <input type="range" id="sl-idle" min="0" max="4" step="1" value="0" oninput="updateUI()">
+          </div>
+        </div>
+
+      </div>
+
+      <div class="action-panel">
+        <button class="send-ecu-btn" onclick="sendToMotoBLE()">⚡ VOLCAR MAPA A LA MOTO</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  // ==========================================
+  // CONFIGURACIÓN DE FIREBASE Y SESIÓN
+  // ==========================================
+  const firebaseConfig = {
+    apiKey: "AIzaSyBk2il4OsRNnnjeGACSY_k2BVVr-XZlHEM",
+    authDomain: "dragonfly-b9624.firebaseapp.com",
+    projectId: "dragonfly-b9624",
+    storageBucket: "dragonfly-b9624.firebasestorage.app",
+    messagingSenderId: "475913668811",
+    appId: "1:475913668811:web:ab84af9fbc81233189734e"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+
+  // RECUPERAR SESIÓN AUTOMÁTICAMENTE
+  auth.onAuthStateChanged((user) => {
+    if (user) {
+      document.getElementById('login-panel').style.display = 'none';
+      document.getElementById('ecu-main').style.display = 'block';
+      updateUI();
+      loadHistory();
+    }
+  });
+
+  function iniciarSesion() {
+    const email = document.getElementById('login-email').value;
+    const pass = document.getElementById('login-password').value;
+    auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+      .then(() => auth.signInWithEmailAndPassword(email, pass))
+      .catch(err => {
+        document.getElementById('login-error').innerText = "Error: Credenciales no válidas.";
+      });
+  }
+
+  // ==========================================
+  // HISTORIAL Y GESTIÓN DE MAPAS (IMPORT/EXPORT)
+  // ==========================================
+  let currentMap = 'dry';
+
+  function getPayload() {
+    return {
+      mapa_base: currentMap,
+      dead: document.getElementById('sl-dead').value,
+      stroke: document.getElementById('sl-stroke').value,
+      curve: document.getElementById('sl-curve').value,
+      mult: document.getElementById('sl-mult').value,
+      inertia: document.getElementById('sl-inertia').value,
+      maxspd: document.getElementById('sl-maxspd').value,
+      pwr: document.getElementById('sl-pwr').value,
+      torque: document.getElementById('sl-torque').value,
+      regen: document.getElementById('sl-regen').value,
+      idle: document.getElementById('sl-idle').value
+    };
+  }
+
+  function exportMap() {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(getPayload(), null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", "dragonfly_mapa_" + Date.now() + ".json");
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  }
+
+  function importMap(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        const imported = JSON.parse(e.target.result);
+        setValues(
+          imported.dead, imported.stroke, imported.curve, imported.mult, imported.inertia, 
+          imported.maxspd, imported.pwr, imported.torque, imported.regen, imported.idle
+        );
+        const mapBtn = document.querySelector(`.map-opt.${imported.mapa_base}`);
+        if(mapBtn) {
+            let colorVar = imported.mapa_base === 'dry' ? 'var(--accent-dry)' : 
+                           imported.mapa_base === 'wet' ? 'var(--accent-wet)' : 'var(--accent-trail)';
+            switchMap(imported.mapa_base, mapBtn, colorVar, false);
+        }
+        alert("Mapa importado con éxito. Listo para aplicar a la moto.");
+      } catch (err) {
+        alert("Error al leer el archivo JSON del mapa.");
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+  }
+
+  function addToHistory() {
+    const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    const payload = getPayload();
+    let history = JSON.parse(localStorage.getItem('ecuHistory')) || [];
+    history.unshift({ time: time, map: payload.mapa_base.toUpperCase(), tq: payload.torque, pwr: payload.pwr });
+    if(history.length > 20) history.pop();
+    localStorage.setItem('ecuHistory', JSON.stringify(history));
+    renderHistory(history);
+  }
+
+  function loadHistory() {
+    const history = JSON.parse(localStorage.getItem('ecuHistory')) || [];
+    renderHistory(history);
+  }
+
+  function renderHistory(history) {
+    const container = document.getElementById('history-container');
+    container.innerHTML = history.length === 0 ? '<div style="text-align:center; padding-top:12px;">Sin mapas volcados todavía.</div>' : '';
+    history.forEach(item => {
+      container.innerHTML += `
+        <div class="history-item">
+          <span class="history-time">${item.time}</span>
+          <span>Volcado: <span class="history-map">${item.map}</span> (Tq:${item.tq}% Pw:${item.pwr}%)</span>
+        </div>`;
+    });
+  }
+
+  // ==========================================
+  // CONEXIÓN REAL WEB BLUETOOTH API
+  // ==========================================
+  let bleDevice = null;
+  let bleCharacteristic = null;
+  const BLE_SERVICE_UUID = "0000ffe0-0000-1000-8000-00805f9b34fb";
+  const BLE_CHAR_UUID    = "0000ffe1-0000-1000-8000-00805f9b34fb";
+
+  async function toggleRealBluetooth() {
+    const statusText = document.getElementById('bt-status-text');
+    const btBtn = document.getElementById('bt-btn');
+
+    if (!navigator.bluetooth) {
+      alert("Web Bluetooth requiere HTTPS o localhost. Sube este archivo a tu Vercel/Firebase para conectar.");
+      return;
+    }
+
+    try {
+      if (!bleDevice || !bleDevice.gatt.connected) {
+        statusText.innerText = "BUSCANDO...";
+        bleDevice = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: [BLE_SERVICE_UUID]
+        });
+
+        statusText.innerText = "CONECTANDO...";
+        const server = await bleDevice.gatt.connect();
+        const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+        bleCharacteristic = await service.getCharacteristic(BLE_CHAR_UUID);
+
+        statusText.innerText = bleDevice.name ? bleDevice.name.toUpperCase() : "CONECTADO";
+        btBtn.classList.add('connected');
+        bleDevice.addEventListener('gattserverdisconnected', onDeviceDisconnected);
+      } else {
+        bleDevice.gatt.disconnect();
+      }
+    } catch (error) {
+      console.error("Error BLE:", error);
+      statusText.innerText = "CONECTAR BLE";
+      btBtn.classList.remove('connected');
+    }
+  }
+
+  function onDeviceDisconnected() {
+    document.getElementById('bt-status-text').innerText = "DESCONECTADO";
+    document.getElementById('bt-btn').classList.remove('connected');
+    bleCharacteristic = null;
+  }
+
+  async function sendToMotoBLE() {
+    const btn = document.querySelector('.send-ecu-btn');
+    const originalText = btn.innerText;
+    const payload = getPayload();
+    
+    const telemetryString = `ECU:${payload.mapa_base},D:${payload.dead},S:${payload.stroke},C:${payload.curve},M:${payload.mult},I:${payload.inertia},SPD:${payload.maxspd},P:${payload.pwr},T:${payload.torque},R:${payload.regen},ID:${payload.idle}\n`;
+
+    btn.innerText = "TRANSMITIENDO A ECU...";
+
+    if (bleCharacteristic && bleDevice && bleDevice.gatt.connected) {
+      try {
+        const encoder = new TextEncoder();
+        await bleCharacteristic.writeValue(encoder.encode(telemetryString));
+        btn.innerText = "✅ TRANSMITIDO A LA MOTO";
+        addToHistory();
+      } catch (err) {
+        console.error("Error BLE:", err);
+        alert("Fallo al enviar datos por Bluetooth.");
+        btn.innerText = "❌ ERROR BLE";
+      }
+    } else {
+      alert("Moto no conectada por Bluetooth. Mapa guardado en el historial local.");
+      btn.innerText = "⚠️ GUARDADO LOCALMENTE";
+      addToHistory();
+    }
+
+    setTimeout(() => { btn.innerText = originalText; }, 2500);
+  }
+
+  // ==========================================
+  // LÓGICA DE INTERFAZ Y GRÁFICOS DINÁMICOS
+  // ==========================================
+  function switchMap(mapId, el, colorVar, applyPresets = true) {
+    currentMap = mapId;
+    document.querySelectorAll('.map-opt').forEach(btn => btn.classList.remove('active', 'dry', 'wet', 'trail'));
+    el.classList.add('active', mapId);
+    document.documentElement.style.setProperty('--active-accent', colorVar);
+    
+    if (applyPresets) {
+      if(mapId === 'dry') { setValues(1, 70, 3, 1.4, 2, 100, 100, 100, 1, 0); }
+      if(mapId === 'wet') { setValues(3, 85, 1, 0.8, 4, 55, 65, 70, 3, 2); }
+      if(mapId === 'trail') { setValues(4, 90, 2, 1.0, 5, 80, 80, 85, 4, 3); }
+    }
+  }
+
+  function setValues(dead, stroke, curve, mult, inertia, maxspd, pwr, torque, regen, idle) {
+    document.getElementById('sl-dead').value = dead;
+    document.getElementById('sl-stroke').value = stroke;
+    document.getElementById('sl-curve').value = curve;
+    document.getElementById('sl-mult').value = mult;
+    document.getElementById('sl-inertia').value = inertia;
+    document.getElementById('sl-maxspd').value = maxspd;
+    document.getElementById('sl-pwr').value = pwr;
+    document.getElementById('sl-torque').value = torque;
+    document.getElementById('sl-regen').value = regen;
+    document.getElementById('sl-idle').value = idle;
+    updateUI();
+  }
+
+  function describeArc(x, y, radius, startAngle, endAngle){
+    const startRad = (endAngle - 180) * Math.PI / 180.0;
+    const endRad = (startAngle - 180) * Math.PI / 180.0;
+    const startX = x + (radius * Math.cos(startRad));
+    const startY = y + (radius * Math.sin(startRad));
+    const endX = x + (radius * Math.cos(endRad));
+    const endY = y + (radius * Math.sin(endRad));
+    return ["M", startX, startY, "A", radius, radius, 0, 0, 0, endX, endY].join(" ");
+  }
+
+  function updateUI() {
+    const vDead = parseInt(document.getElementById('sl-dead').value);
+    const vStroke = parseInt(document.getElementById('sl-stroke').value);
+    const vCurve = parseInt(document.getElementById('sl-curve').value);
+    const vMult = parseFloat(document.getElementById('sl-mult').value);
+    const vInertia = parseInt(document.getElementById('sl-inertia').value);
+    const vMaxSpd = parseInt(document.getElementById('sl-maxspd').value);
+    const vPwr = parseInt(document.getElementById('sl-pwr').value);
+    const vTorque = parseInt(document.getElementById('sl-torque').value);
+    const vRegen = parseInt(document.getElementById('sl-regen').value);
+    const vIdle = parseInt(document.getElementById('sl-idle').value);
+
+    const curveNames = ['Suave', 'Lineal', 'Agresiva'];
+    const regenNames = ['Nulo', 'Bajo', 'Medio', 'Fuerte', 'Muy Fuerte', 'Máximo'];
+    const idleNames = ['Desactivado', 'Nivel 1', 'Nivel 2', 'Nivel 3', 'Nivel 4'];
+
+    document.getElementById('lbl-dead').innerText = vDead + ' mm';
+    document.getElementById('lbl-stroke').innerText = vStroke + '°';
+    document.getElementById('lbl-curve').innerText = curveNames[vCurve - 1];
+    document.getElementById('lbl-mult').innerText = vMult.toFixed(1) + 'x';
+    document.getElementById('lbl-inertia').innerText = 'Nivel ' + vInertia;
+    document.getElementById('lbl-maxspd').innerText = (vMaxSpd === 100) ? 'Sin Límite' : vMaxSpd + ' km/h';
+    document.getElementById('lbl-pwr').innerText = vPwr + '%';
+    document.getElementById('lbl-torque').innerText = vTorque + '%';
+    document.getElementById('lbl-regen').innerText = regenNames[vRegen];
+    document.getElementById('lbl-idle').innerText = idleNames[vIdle];
+
+    // Rellenos de Sliders
+    document.getElementById('fill-dead').style.width = `${(vDead / 10) * 100}%`;
+    document.getElementById('fill-stroke').style.width = `${((vStroke - 50) / 50) * 100}%`;
+    document.getElementById('fill-curve').style.width = `${((vCurve - 1) / 2) * 100}%`;
+    document.getElementById('fill-mult').style.width = `${((vMult - 0.5) / 1.5) * 100}%`;
+    document.getElementById('fill-inertia').style.width = `${(vInertia / 10) * 100}%`;
+    document.getElementById('fill-maxspd').style.width = `${((vMaxSpd - 10) / 90) * 100}%`;
+    document.getElementById('fill-pwr').style.width = `${((vPwr - 10) / 90) * 100}%`;
+    document.getElementById('fill-torque').style.width = `${((vTorque - 10) / 90) * 100}%`;
+    document.getElementById('fill-regen').style.width = `${(vRegen / 5) * 100}%`;
+    document.getElementById('fill-idle').style.width = `${(vIdle / 4) * 100}%`;
+
+    // Actualización de SVGs Dinámicos
+    document.getElementById('svg-dead').setAttribute('x2', (vDead * 10).toString());
+
+    const strokeAngle = ((vStroke - 50) / 50) * 180; 
+    document.getElementById('svg-stroke').setAttribute('d', describeArc(50, 28, 35, 0, strokeAngle));
+
+    let dCurve = "";
+    if (vCurve === 1) dCurve = "M 0 30 Q 80 30 100 0";
+    if (vCurve === 2) dCurve = "M 0 30 L 100 0";
+    if (vCurve === 3) dCurve = "M 0 30 Q 20 0 100 0";
+    document.getElementById('svg-curve').setAttribute('d', dCurve);
+
+    document.getElementById('svg-mult').setAttribute('y2', (28 - (vMult * 14)).toString());
+
+    document.getElementById('svg-inertia').setAttribute('d', `M 0 13 Q 30 ${26 - vInertia * 2.2}, 100 13`);
+
+    document.getElementById('svg-maxspd-bar').setAttribute('width', vMaxSpd.toString());
+
+    renderBars('svg-pwr', vPwr);
+    renderBars('svg-torque', vTorque);
+
+    document.getElementById('svg-regen').style.strokeWidth = (vRegen + 1).toString();
+    document.getElementById('svg-idle').style.opacity = (vIdle === 0) ? "0.2" : (0.3 + vIdle * 0.17).toString();
+  }
+
+  function renderBars(containerId, value) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = '';
+    const numBars = 18;
+    const activeBars = Math.round((value / 100) * numBars);
+    for(let i = 0; i < numBars; i++) {
+        let bar = document.createElement('div');
+        bar.style.flex = "1";
+        bar.style.backgroundColor = i < activeBars ? "var(--active-accent)" : "rgba(255,255,255,0.05)";
+        bar.style.height = (25 + (i * 4)) + "%";
+        bar.style.borderRadius = "2px";
+        container.appendChild(bar);
+    }
+  }
+
+  window.addEventListener('DOMContentLoaded', () => {
+      updateUI();
+  });
+</script>
+</body>
+</html>
