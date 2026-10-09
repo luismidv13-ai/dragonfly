@@ -206,6 +206,27 @@
   .send-ecu-btn:hover { background: var(--active-accent); color: #000; box-shadow: 0 0 20px var(--active-accent); }
   .send-ecu-btn:active { transform: translateY(2px); }
 
+  /* EDITOR DE CURVA PERSONALIZADA */
+  .curve-editor { display: none; margin-top: 10px; background: #06070a; border: 1px solid var(--border-line); border-radius: 10px; padding: 10px 8px 6px; }
+  .curve-editor.open { display: block; animation: curveEditorIn 0.25s ease; }
+  @keyframes curveEditorIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  .curve-editor-head { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 0 4px 8px; flex-wrap: wrap; }
+  .curve-readout { flex: 1; min-width: 130px; font-size: 0.58rem; color: var(--text-dim); font-family: monospace; letter-spacing: 0.4px; }
+  .curve-readout b { color: var(--active-accent); }
+  .curve-editor-tools { display: flex; gap: 5px; }
+  .curve-tool-btn { background: rgba(255,255,255,0.04); border: 1px solid var(--border-line); color: var(--text-desc); font-family: inherit; font-size: 0.55rem; font-weight: 600; padding: 4px 7px; border-radius: 5px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; transition: all 0.2s ease; }
+  .curve-tool-btn:hover { color: #fff; border-color: var(--active-accent); }
+  #curve-svg { width: 100%; max-height: 240px; display: block; touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+  #curve-svg.dragging { cursor: grabbing; }
+  .curve-grid { stroke: rgba(255,255,255,0.055); stroke-width: 1; }
+  .curve-axes { stroke: rgba(255,255,255,0.16); stroke-width: 1; }
+  .curve-axis-text { fill: #4b5a70; font-size: 6.5px; font-family: 'Chakra Petch', sans-serif; letter-spacing: 0.5px; }
+  .curve-path { fill: none; stroke: var(--active-accent); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 3px var(--active-accent)); }
+  .curve-area { fill: var(--active-accent); opacity: 0.07; }
+  .curve-dot { fill: var(--panel-bg); stroke: var(--active-accent); stroke-width: 2.5; }
+  .curve-dot.active { fill: var(--active-accent); }
+  .curve-hit { fill: transparent; }
+
   /* LOGIN */
   #login-panel { padding: 40px 20px; text-align: center; }
   .input-field { width: 100%; background: #06070a; border: 1px solid var(--border-line); border-radius: 8px; padding: 14px; color: #fff; font-family: inherit; margin-bottom: 15px; outline: none; }
@@ -309,7 +330,7 @@
           <div class="param-head">
             <div>
               <span class="param-title">3. Curva de Potencia</span>
-              <span class="param-desc">Progresión del motor: Suave, Lineal o Agresiva.</span>
+              <span class="param-desc">Progresión del motor: Suave, Lineal, Agresiva o dibuja tu propia curva.</span>
             </div>
             <span class="param-number" id="lbl-curve">Agresiva</span>
           </div>
@@ -322,7 +343,19 @@
           <div class="slider-wrapper">
             <div class="slider-track-bg"></div>
             <div class="slider-track-fill" id="fill-curve"></div>
-            <input type="range" id="sl-curve" min="1" max="3" step="1" value="3" oninput="updateUI()">
+            <input type="range" id="sl-curve" min="1" max="4" step="1" value="3" oninput="updateUI()">
+          </div>
+          <!-- EDITOR DE CURVA PERSONALIZADA -->
+          <div class="curve-editor" id="curve-editor">
+            <div class="curve-editor-head">
+              <span class="curve-readout" id="curve-readout">Arrastra los puntos para dibujar tu curva</span>
+              <div class="curve-editor-tools">
+                <button type="button" class="curve-tool-btn" onclick="applyCurvePreset(1)">Suave</button>
+                <button type="button" class="curve-tool-btn" onclick="applyCurvePreset(2)">Lineal</button>
+                <button type="button" class="curve-tool-btn" onclick="applyCurvePreset(3)">Agresiva</button>
+              </div>
+            </div>
+            <svg id="curve-svg" viewBox="0 0 300 168" preserveAspectRatio="xMidYMid meet"></svg>
           </div>
         </div>
 
@@ -484,6 +517,20 @@
 
 <script>
   // ==========================================
+  // ESTADO GLOBAL (debe declararse antes de cualquier uso)
+  // ==========================================
+  const CURVE_N = 9;                                        // puntos de control (X equiespaciados)
+  const CURVE_LABELS = ['Suave', 'Lineal', 'Agresiva', 'CUSTOM ★'];
+  const CVB = { W: 300, H: 168, L: 26, R: 292, T: 14, B: 150 };  // geometría del editor (viewBox)
+  let curvePoints = null;       // % de motor en cada punto de control
+  let prevCurveValue = 3;       // curva seleccionada antes de entrar en CUSTOM
+  let dragIdx = -1;
+
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const curveX = i => CVB.L + i * (CVB.R - CVB.L) / (CURVE_N - 1);
+  const curveY = m => CVB.B - (m / 100) * (CVB.B - CVB.T);
+
+  // ==========================================
   // CONFIGURACIÓN DE FIREBASE Y SESIÓN
   // ==========================================
   const firebaseConfig = {
@@ -494,20 +541,34 @@
     messagingSenderId: "475913668811",
     appId: "1:475913668811:web:ab84af9fbc81233189734e"
   };
-  firebase.initializeApp(firebaseConfig);
-  const auth = firebase.auth();
+  let auth = null;
+  try {
+    firebase.initializeApp(firebaseConfig);
+    auth = firebase.auth();
 
-  // RECUPERAR SESIÓN AUTOMÁTICAMENTE
-  auth.onAuthStateChanged((user) => {
-    if (user) {
-      document.getElementById('login-panel').style.display = 'none';
-      document.getElementById('ecu-main').style.display = 'block';
-      updateUI();
-      loadHistory();
-    }
-  });
+    // RECUPERAR SESIÓN AUTOMÁTICAMENTE
+    auth.onAuthStateChanged((user) => {
+      if (user) {
+        document.getElementById('login-panel').style.display = 'none';
+        document.getElementById('ecu-main').style.display = 'block';
+        updateUI();
+        loadHistory();
+      }
+    });
+  } catch (e) {
+    // Firebase no disponible (sin conexión / CDN bloqueada): la ECU funciona en modo local
+    console.warn("Firebase no disponible — modo local activado.");
+    document.getElementById('login-panel').style.display = 'none';
+    document.getElementById('ecu-main').style.display = 'block';
+    updateUI();
+    loadHistory();
+  }
 
   function iniciarSesion() {
+    if (!auth) {
+      document.getElementById('login-error').innerText = "Sin conexión con el servidor de cuentas. La app funciona en modo local.";
+      return;
+    }
     const email = document.getElementById('login-email').value;
     const pass = document.getElementById('login-password').value;
     auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
@@ -523,7 +584,7 @@
   let currentMap = 'dry';
 
   function getPayload() {
-    return {
+    const payload = {
       mapa_base: currentMap,
       dead: document.getElementById('sl-dead').value,
       stroke: document.getElementById('sl-stroke').value,
@@ -536,6 +597,8 @@
       regen: document.getElementById('sl-regen').value,
       idle: document.getElementById('sl-idle').value
     };
+    if (parseInt(payload.curve) === 4 && curvePoints) payload.curve_pts = curvePoints.slice();
+    return payload;
   }
 
   function exportMap() {
@@ -555,6 +618,10 @@
     reader.onload = function(e) {
       try {
         const imported = JSON.parse(e.target.result);
+        if (Array.isArray(imported.curve_pts) && imported.curve_pts.length === CURVE_N) {
+          curvePoints = imported.curve_pts.map(v => clamp(Math.round(parseFloat(v)), 0, 100));
+          saveCurveLocal();
+        }
         setValues(
           imported.dead, imported.stroke, imported.curve, imported.mult, imported.inertia, 
           imported.maxspd, imported.pwr, imported.torque, imported.regen, imported.idle
@@ -577,8 +644,9 @@
   function addToHistory() {
     const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
     const payload = getPayload();
+    const curveTag = CURVE_LABELS[clamp(parseInt(payload.curve), 1, 4) - 1];
     let history = JSON.parse(localStorage.getItem('ecuHistory')) || [];
-    history.unshift({ time: time, map: payload.mapa_base.toUpperCase(), tq: payload.torque, pwr: payload.pwr });
+    history.unshift({ time: time, map: payload.mapa_base.toUpperCase(), cv: curveTag, tq: payload.torque, pwr: payload.pwr });
     if(history.length > 20) history.pop();
     localStorage.setItem('ecuHistory', JSON.stringify(history));
     renderHistory(history);
@@ -596,7 +664,7 @@
       container.innerHTML += `
         <div class="history-item">
           <span class="history-time">${item.time}</span>
-          <span>Volcado: <span class="history-map">${item.map}</span> (Tq:${item.tq}% Pw:${item.pwr}%)</span>
+          <span>Volcado: <span class="history-map">${item.map}</span> · ${item.cv || ''} (Tq:${item.tq}% Pw:${item.pwr}%)</span>
         </div>`;
     });
   }
@@ -655,7 +723,11 @@
     const originalText = btn.innerText;
     const payload = getPayload();
     
-    const telemetryString = `ECU:${payload.mapa_base},D:${payload.dead},S:${payload.stroke},C:${payload.curve},M:${payload.mult},I:${payload.inertia},SPD:${payload.maxspd},P:${payload.pwr},T:${payload.torque},R:${payload.regen},ID:${payload.idle}\n`;
+    let telemetryString = `ECU:${payload.mapa_base},D:${payload.dead},S:${payload.stroke},C:${payload.curve},M:${payload.mult},I:${payload.inertia},SPD:${payload.maxspd},P:${payload.pwr},T:${payload.torque},R:${payload.regen},ID:${payload.idle}`;
+    if (payload.curve_pts) {
+      telemetryString += `,CV:${sampleCurve(curvePoints, 10).join('-')}`;
+    }
+    telemetryString += '\n';
 
     btn.innerText = "TRANSMITIENDO A ECU...";
 
@@ -680,12 +752,204 @@
   }
 
   // ==========================================
+  // EDITOR DE CURVA PERSONALIZADA
+  // ==========================================
+  // El estado (CURVE_N, CURVE_LABELS, CVB, curvePoints, prevCurveValue,
+  // dragIdx, clamp, curveX, curveY) se declara al inicio del script.
+
+  // Genera una curva de fábrica muestreada en los 9 puntos (1=Suave, 2=Lineal, 3=Agresiva)
+  function seedCurveFromShape(shape) {
+    const pts = [];
+    for (let i = 0; i < CURVE_N; i++) {
+      const x = i * 100 / (CURVE_N - 1);
+      let m;
+      if (shape === 1) {          // Suave: Q 80 30 → motor = t²
+        const t = (160 - Math.sqrt(25600 - 240 * x)) / 120;
+        m = t * t;
+      } else if (shape === 2) {   // Lineal
+        m = x / 100;
+      } else {                    // Agresiva: Q 20 0 → motor = 2t - t²
+        const t = (-40 + Math.sqrt(1600 + 240 * x)) / 120;
+        m = 2 * t - t * t;
+      }
+      pts.push(Math.round(clamp(m, 0, 1) * 100));
+    }
+    return pts;
+  }
+
+  // Spline Catmull-Rom → path Bézier sobre un mapeador de coordenadas
+  function buildCurvePathD(points, mapX, mapY) {
+    const P = points.map((m, i) => [mapX(i), mapY(m)]);
+    let d = `M ${P[0][0]} ${P[0][1]}`;
+    for (let i = 0; i < P.length - 1; i++) {
+      const p0 = P[Math.max(0, i - 1)], p1 = P[i], p2 = P[i + 1], p3 = P[Math.min(P.length - 1, i + 2)];
+      const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+      const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+      d += ` C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${p2[0].toFixed(2)} ${p2[1].toFixed(2)}`;
+    }
+    return d;
+  }
+
+  // Evalúa la curva en `steps` tramos (para el payload BLE / export)
+  function sampleCurve(points, steps) {
+    const out = [];
+    for (let s = 0; s <= steps; s++) {
+      const f = (s * 100 / steps) / 100 * (CURVE_N - 1);
+      const i = Math.min(CURVE_N - 2, Math.floor(f));
+      const t = f - i;
+      const p0 = points[Math.max(0, i - 1)] / 100, p1 = points[i] / 100,
+            p2 = points[i + 1] / 100, p3 = points[Math.min(CURVE_N - 1, i + 2)] / 100;
+      const m = 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t);
+      out.push(Math.round(clamp(m, 0, 1) * 100));
+    }
+    return out;
+  }
+
+  function ensureEditorDom() {
+    const svg = document.getElementById('curve-svg');
+    if (svg.dataset.built) return svg;
+    svg.dataset.built = '1';
+    const NS = 'http://www.w3.org/2000/svg';
+    const mk = (tag, attrs) => { const el = document.createElementNS(NS, tag); for (const k in attrs) el.setAttribute(k, attrs[k]); return el; };
+
+    // Rejilla
+    for (let g = 0; g <= 4; g++) {
+      const gy = curveY(g * 25);
+      svg.appendChild(mk('line', { x1: CVB.L, y1: gy, x2: CVB.R, y2: gy, class: 'curve-grid' }));
+    }
+    for (let i = 0; i < CURVE_N; i++) {
+      svg.appendChild(mk('line', { x1: curveX(i), y1: CVB.T, x2: curveX(i), y2: CVB.B, class: 'curve-grid' }));
+    }
+    // Ejes y etiquetas
+    svg.appendChild(mk('line', { x1: CVB.L, y1: CVB.T, x2: CVB.L, y2: CVB.B, class: 'curve-axes' }));
+    svg.appendChild(mk('line', { x1: CVB.L, y1: CVB.B, x2: CVB.R, y2: CVB.B, class: 'curve-axes' }));
+    const tG = mk('text', { x: CVB.R, y: CVB.B + 13, 'text-anchor': 'end', class: 'curve-axis-text' });
+    tG.textContent = 'PUÑO DE GAS →';
+    const tM = mk('text', { x: 10, y: (CVB.T + CVB.B) / 2, 'text-anchor': 'middle', class: 'curve-axis-text' });
+    tM.setAttribute('transform', `rotate(-90 10 ${(CVB.T + CVB.B) / 2})`);
+    tM.textContent = 'MOTOR ↑';
+    const t0 = mk('text', { x: CVB.L - 5, y: CVB.B + 3, 'text-anchor': 'end', class: 'curve-axis-text' }); t0.textContent = '0';
+    const t100 = mk('text', { x: CVB.L - 5, y: CVB.T + 3, 'text-anchor': 'end', class: 'curve-axis-text' }); t100.textContent = '100';
+    svg.appendChild(tG); svg.appendChild(tM); svg.appendChild(t0); svg.appendChild(t100);
+    // Área y línea de curva
+    svg.appendChild(mk('path', { class: 'curve-area', id: 'curve-area' }));
+    svg.appendChild(mk('path', { class: 'curve-path', id: 'curve-line' }));
+    // Puntos de control + zonas de agarre amplias (táctil)
+    for (let i = 0; i < CURVE_N; i++) {
+      svg.appendChild(mk('circle', { cx: curveX(i), cy: curveY(50), r: 12, class: 'curve-hit', 'data-idx': i }));
+      svg.appendChild(mk('circle', { cx: curveX(i), cy: curveY(50), r: 4.5, class: 'curve-dot', 'data-idx': i }));
+    }
+    svg.addEventListener('pointerdown', onCurvePointerDown);
+    svg.addEventListener('pointermove', onCurvePointerMove);
+    svg.addEventListener('pointerup', onCurvePointerUp);
+    svg.addEventListener('pointercancel', onCurvePointerUp);
+    return svg;
+  }
+
+  function curveIdxFromEvent(e) {
+    const t = e.target;
+    if (t && t.dataset && t.dataset.idx !== undefined) return parseInt(t.dataset.idx);
+    const svg = document.getElementById('curve-svg');
+    const rect = svg.getBoundingClientRect();
+    const xVB = (e.clientX - rect.left) * (CVB.W / rect.width);
+    let best = -1, bd = Infinity;
+    for (let i = 0; i < CURVE_N; i++) { const d = Math.abs(curveX(i) - xVB); if (d < bd) { bd = d; best = i; } }
+    return bd <= 16 ? best : -1;
+  }
+
+  function onCurvePointerDown(e) {
+    if (curvePoints === null) return;
+    const idx = curveIdxFromEvent(e);
+    if (idx < 0) return;
+    e.preventDefault();
+    dragIdx = idx;
+    const svg = document.getElementById('curve-svg');
+    svg.classList.add('dragging');
+    if (svg.setPointerCapture) { try { svg.setPointerCapture(e.pointerId); } catch (err) {} }
+    applyCurveDrag(e);
+  }
+
+  function onCurvePointerMove(e) {
+    if (dragIdx < 0) return;
+    e.preventDefault();
+    applyCurveDrag(e);
+  }
+
+  function onCurvePointerUp() {
+    if (dragIdx < 0) return;
+    dragIdx = -1;
+    document.getElementById('curve-svg').classList.remove('dragging');
+    document.getElementById('curve-readout').innerHTML = 'CURVA GUARDADA · Sigue ajustando o vuelca el mapa';
+    saveCurveLocal();
+  }
+
+  function applyCurveDrag(e) {
+    const svg = document.getElementById('curve-svg');
+    const rect = svg.getBoundingClientRect();
+    const yVB = (e.clientY - rect.top) * (CVB.H / rect.height);
+    curvePoints[dragIdx] = Math.round(clamp((CVB.B - yVB) / (CVB.B - CVB.T) * 100, 0, 100));
+    const xPct = Math.round(dragIdx * 100 / (CURVE_N - 1));
+    document.getElementById('curve-readout').innerHTML = `GAS <b>${xPct}%</b> → MOTOR <b>${curvePoints[dragIdx]}%</b>`;
+    renderCurveEditor();
+    renderMiniCurve();
+  }
+
+  function renderCurveEditor() {
+    if (curvePoints === null) return;
+    const svg = ensureEditorDom();
+    svg.querySelector('#curve-line').setAttribute('d', buildCurvePathD(curvePoints, curveX, curveY));
+    svg.querySelector('#curve-area').setAttribute('d', buildCurvePathD(curvePoints, curveX, curveY) + ` L ${CVB.R} ${CVB.B} L ${CVB.L} ${CVB.B} Z`);
+    svg.querySelectorAll('.curve-dot').forEach(dot => {
+      const i = parseInt(dot.dataset.idx);
+      dot.setAttribute('cy', curveY(curvePoints[i]));
+      dot.classList.toggle('active', i === dragIdx);
+    });
+    svg.querySelectorAll('.curve-hit').forEach(h => h.setAttribute('cy', curveY(curvePoints[parseInt(h.dataset.idx)])));
+  }
+
+  function renderMiniCurve() {
+    const vCurve = parseInt(document.getElementById('sl-curve').value);
+    let d;
+    if (vCurve === 4 && curvePoints) {
+      d = buildCurvePathD(curvePoints, i => i * (100 / (CURVE_N - 1)), m => 30 - m * 0.3);
+    } else {
+      if (vCurve === 1) d = "M 0 30 Q 80 30 100 0";
+      else if (vCurve === 2) d = "M 0 30 L 100 0";
+      else d = "M 0 30 Q 20 0 100 0";
+    }
+    document.getElementById('svg-curve').setAttribute('d', d);
+  }
+
+  function applyCurvePreset(shape) {
+    curvePoints = seedCurveFromShape(shape);
+    document.getElementById('curve-readout').innerHTML = `PLANTILLA <b>${CURVE_LABELS[shape - 1].replace(' ★', '')}</b> APLICADA · Ajusta los puntos`;
+    renderCurveEditor();
+    renderMiniCurve();
+    saveCurveLocal();
+  }
+
+  function saveCurveLocal() {
+    try { localStorage.setItem('dfxCurve', JSON.stringify(curvePoints)); } catch (e) {}
+  }
+
+  function loadCurveLocal() {
+    try {
+      const arr = JSON.parse(localStorage.getItem('dfxCurve'));
+      if (Array.isArray(arr) && arr.length === CURVE_N && arr.every(v => typeof v === 'number' && v >= 0 && v <= 100)) {
+        curvePoints = arr;
+      }
+    } catch (e) {}
+  }
+
+  // ==========================================
   // LÓGICA DE INTERFAZ Y GRÁFICOS DINÁMICOS
   // ==========================================
   function switchMap(mapId, el, colorVar, applyPresets = true) {
     currentMap = mapId;
-    document.querySelectorAll('.map-opt').forEach(btn => btn.classList.remove('active', 'dry', 'wet', 'trail'));
-    el.classList.add('active', mapId);
+    // Solo se altera el estado 'active'; las clases de identidad (dry/wet/trail)
+    // se conservan para que las búsquedas por mapa sigan funcionando.
+    document.querySelectorAll('.map-opt').forEach(btn => btn.classList.remove('active'));
+    el.classList.add('active');
     document.documentElement.style.setProperty('--active-accent', colorVar);
     
     if (applyPresets) {
@@ -731,13 +995,17 @@
     const vRegen = parseInt(document.getElementById('sl-regen').value);
     const vIdle = parseInt(document.getElementById('sl-idle').value);
 
-    const curveNames = ['Suave', 'Lineal', 'Agresiva'];
     const regenNames = ['Nulo', 'Bajo', 'Medio', 'Fuerte', 'Muy Fuerte', 'Máximo'];
     const idleNames = ['Desactivado', 'Nivel 1', 'Nivel 2', 'Nivel 3', 'Nivel 4'];
 
+    if (vCurve === 4 && curvePoints === null) {
+      curvePoints = seedCurveFromShape(prevCurveValue);
+      saveCurveLocal();
+    }
+
     document.getElementById('lbl-dead').innerText = vDead + ' mm';
     document.getElementById('lbl-stroke').innerText = vStroke + '°';
-    document.getElementById('lbl-curve').innerText = curveNames[vCurve - 1];
+    document.getElementById('lbl-curve').innerText = CURVE_LABELS[vCurve - 1];
     document.getElementById('lbl-mult').innerText = vMult.toFixed(1) + 'x';
     document.getElementById('lbl-inertia').innerText = 'Nivel ' + vInertia;
     document.getElementById('lbl-maxspd').innerText = (vMaxSpd === 100) ? 'Sin Límite' : vMaxSpd + ' km/h';
@@ -749,7 +1017,7 @@
     // Rellenos de Sliders
     document.getElementById('fill-dead').style.width = `${(vDead / 10) * 100}%`;
     document.getElementById('fill-stroke').style.width = `${((vStroke - 50) / 50) * 100}%`;
-    document.getElementById('fill-curve').style.width = `${((vCurve - 1) / 2) * 100}%`;
+    document.getElementById('fill-curve').style.width = `${((vCurve - 1) / 3) * 100}%`;
     document.getElementById('fill-mult').style.width = `${((vMult - 0.5) / 1.5) * 100}%`;
     document.getElementById('fill-inertia').style.width = `${(vInertia / 10) * 100}%`;
     document.getElementById('fill-maxspd').style.width = `${((vMaxSpd - 10) / 90) * 100}%`;
@@ -764,11 +1032,9 @@
     const strokeAngle = ((vStroke - 50) / 50) * 180; 
     document.getElementById('svg-stroke').setAttribute('d', describeArc(50, 28, 35, 0, strokeAngle));
 
-    let dCurve = "";
-    if (vCurve === 1) dCurve = "M 0 30 Q 80 30 100 0";
-    if (vCurve === 2) dCurve = "M 0 30 L 100 0";
-    if (vCurve === 3) dCurve = "M 0 30 Q 20 0 100 0";
-    document.getElementById('svg-curve').setAttribute('d', dCurve);
+    renderMiniCurve();
+    document.getElementById('curve-editor').classList.toggle('open', vCurve === 4);
+    if (vCurve === 4) renderCurveEditor();
 
     document.getElementById('svg-mult').setAttribute('y2', (28 - (vMult * 14)).toString());
 
@@ -781,6 +1047,8 @@
 
     document.getElementById('svg-regen').style.strokeWidth = (vRegen + 1).toString();
     document.getElementById('svg-idle').style.opacity = (vIdle === 0) ? "0.2" : (0.3 + vIdle * 0.17).toString();
+
+    prevCurveValue = vCurve;
   }
 
   function renderBars(containerId, value) {
@@ -799,6 +1067,7 @@
   }
 
   window.addEventListener('DOMContentLoaded', () => {
+      loadCurveLocal();
       updateUI();
   });
 </script>
